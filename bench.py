@@ -88,7 +88,7 @@ def bw_parse( result ):
 
 def bandwidth( configs, blocksizes, iterations, size, notes, progress, logging ):
     runidx = run_config(notes)
-    td = pd.DataFrame( { "Run Config": [], "Target": [], "Blocksize": [], "Iteration:": [], "Bandwidth": []})
+    td = pd.DataFrame( { "Run Config": [], "Target": [], "Blocksize": [], "Iteration": [], "Bandwidth": []})
     with open('bandwidth.csv', 'a', encoding='UTF8') as f:
         writer = csv.writer(f)
         for c in configs:
@@ -111,3 +111,15 @@ def bandwidth( configs, blocksizes, iterations, size, notes, progress, logging )
                     td.loc[len(td.index)] = [runidx, str(c), b, i, result]
             c.done()
     return td
+
+def refine( results ):
+    cs = results['Target'].unique()
+    bs = results['Blocksize'].unique()
+    processed = pd.DataFrame( { "Target": [], "Blocksize": [],  "MeanBW": [], "MinBW": [], "MaxBW": [], "MaxStdD": [] } )
+    for c in cs:
+        for b in bs:
+            q = 'Target == "'+c+'" and Blocksize == '+str(b)
+            row = results.query(q)
+            first = row.head(1)
+            processed.loc[len(processed.index)] = [ c, b, row['Bandwidth'].mean(),row['Bandwidth'].min(),row['Bandwidth'].max(), row['Bandwidth'].std() ]
+    return processed
