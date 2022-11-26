@@ -8,6 +8,7 @@ import subprocess
 import socket
 import time
 import csv
+import pandas as pd
 
 class BenchTarget:
     def __init__(self, name, cmd, source, fstab):
@@ -22,11 +23,20 @@ class BenchTarget:
     def start(self):
         if(self.cmd != ""):
             self.p = subprocess.Popen( self.cmd, stdin=None, stdout=None, stderr=None, close_fds=True)
-        print("started "+str(self.cmd))
     
     def done(self):
         if(self.cmd != ""):
             self.p.terminate()
+
+class BenchProgress:
+    def __init__(self, t, sd):
+        self.iteration = 0
+        self.total = t
+        self.stepDesc = sd
+    
+    def step( self, note ):
+        self.iteration = self.iteration + 1
+        self.stepDesc( note, self.iteration, self.total )
 
 def cpu(cmd, host, fst):
     cfst=""
@@ -34,7 +44,7 @@ def cpu(cmd, host, fst):
         host="localhost"
     if(fst != ""):
         cfst="-fstab "+fst
-    return subprocess.check_output("../cpu/bin/cpu "+ cfst + " " + host + " " +cmd, shell=True).decode('utf-8')
+    return subprocess.check_output("../cpu/bin/cpu "+ cfst + " " + host + " " +cmd, shell=True, stdin=subprocess.DEVNULL, stderr=subprocess.STDOUT).decode('utf-8')
 
 def get_gcc_vers():
     return subprocess.check_output("gcc -v 2>&1 | tail -1", shell=True).decode('utf-8').split()[2]
@@ -76,34 +86,28 @@ def bw_parse( result ):
         return -1;
     return components[-2]
 
-def bandwidth( configs, blocksizes, iterations, size, notes ):
+def bandwidth( configs, blocksizes, iterations, size, notes, progress, logging ):
     runidx = run_config(notes)
+    td = pd.DataFrame( { "Run Config": [], "Target": [], "Blocksize": [], "Iteration:": [], "Bandwidth": []})
     with open('bandwidth.csv', 'a', encoding='UTF8') as f:
         writer = csv.writer(f)
         for c in configs:
             c.start()
             # warmup run first
-            print("Warmup run")
             cpu(bw_cmd(blocksizes[0], c.source, int(size/blocksizes[0])), "localhost", c.fstab)
             for b in blocksizes:
                 sz = int(size/b)
                 for i in range(iterations):
-                    print(bw_cmd(b, c.source, sz))
+                    if(logging != None):
+                        logging.debug(bw_cmd(b, c.source, sz))
                     result = float(bw_parse(cpu(bw_cmd(b, c.source, sz), "localhost", c.fstab)))
+                    if(logging != None):
+                        logging.debug((str(c)+" " + str(b) + " " + str(i) + " " + str(result)))
                     if(result < 0):
-                        raise "Bad data"
-                    print(str(c)+" " + str(b) + " " + str(i) + " " + str(result))
+                        raise ValueError("Bad data")
+                    if(progress != None):
+                        progress.step((str(c)+" " + str(b) + " " + str(i) + " " + str(result)))
                     writer.writerow([runidx, str(c), b, i, result] )
+                    td.loc[len(td.index)] = [runidx, str(c), b, i, result]
             c.done()
-
-# this stuff should go in the notebook
-
-npfs = BenchTarget("npfs", ["../npfs/fs/npfs", "-p", "5640", "-w", "8", "-s"], "/mnt/9/test", "netfstab")
-p9ufs = BenchTarget("p9ufs",["../p9/cmd/p9ufs/p9ufs","0.0.0.0:5640"], "/mnt/9/test", "netfstab")
-virtio = BenchTarget("virtio","","/mnt/9/test", "virtiofstab")
-cpud = BenchTarget("cpu", "", "./test", "fstab")
-
-testcfgs = [ virtio, npfs, p9ufs, cpud ]
-blocksizes = [ 131072, 65536, 32768, 16384, 8192, 4096, 1024, 512 ]
-
-bandwidth( testcfgs, blocksizes, 5, 131072*10000, "test") 
+    return td
